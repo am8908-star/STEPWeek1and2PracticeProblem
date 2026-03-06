@@ -1,71 +1,109 @@
 import java.util.*;
 
-class FlashSaleInventoryManager {
+class DNSCache {
 
-    // productId -> stock count
-    private HashMap<String, Integer> stockMap;
+    class DNSEntry {
+        String domain;
+        String ipAddress;
+        long expiryTime;
 
-    // productId -> waiting list (FIFO)
-    private HashMap<String, LinkedHashMap<Integer, Integer>> waitingList;
-
-    public FlashSaleInventoryManager() {
-        stockMap = new HashMap<>();
-        waitingList = new HashMap<>();
-    }
-
-    // Add product with stock
-    public void addProduct(String productId, int stock) {
-        stockMap.put(productId, stock);
-        waitingList.put(productId, new LinkedHashMap<>());
-    }
-
-    // Check stock availability
-    public int checkStock(String productId) {
-        return stockMap.getOrDefault(productId, 0);
-    }
-
-    // Purchase item (thread-safe)
-    public synchronized String purchaseItem(String productId, int userId) {
-
-        int stock = stockMap.getOrDefault(productId, 0);
-
-        if (stock > 0) {
-            stockMap.put(productId, stock - 1);
-            return "Success, " + (stock - 1) + " units remaining";
+        DNSEntry(String domain, String ipAddress, long ttlSeconds) {
+            this.domain = domain;
+            this.ipAddress = ipAddress;
+            this.expiryTime = System.currentTimeMillis() + ttlSeconds * 1000;
         }
 
-        // add to waiting list
-        LinkedHashMap<Integer, Integer> queue = waitingList.get(productId);
-        int position = queue.size() + 1;
-        queue.put(userId, position);
-
-        return "Added to waiting list, position #" + position;
-    }
-
-    // View waiting list
-    public void printWaitingList(String productId) {
-        LinkedHashMap<Integer, Integer> queue = waitingList.get(productId);
-
-        for (Integer user : queue.keySet()) {
-            System.out.println("User " + user + " -> Position " + queue.get(user));
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiryTime;
         }
     }
 
-    public static void main(String[] args) {
+    private int capacity;
+    private HashMap<String, DNSEntry> cache;
 
-        FlashSaleInventoryManager manager = new FlashSaleInventoryManager();
+    // LinkedHashMap for LRU
+    private LinkedHashMap<String, DNSEntry> lruMap;
 
-        manager.addProduct("IPHONE15_256GB", 3);
+    private int hits = 0;
+    private int misses = 0;
 
-        System.out.println("Stock: " + manager.checkStock("IPHONE15_256GB"));
+    public DNSCache(int capacity) {
+        this.capacity = capacity;
 
-        System.out.println(manager.purchaseItem("IPHONE15_256GB", 12345));
-        System.out.println(manager.purchaseItem("IPHONE15_256GB", 67890));
-        System.out.println(manager.purchaseItem("IPHONE15_256GB", 11111));
-        System.out.println(manager.purchaseItem("IPHONE15_256GB", 22222));
-        System.out.println(manager.purchaseItem("IPHONE15_256GB", 33333));
+        cache = new HashMap<>();
 
-        System.out.println("\nWaiting List:");
-        manager.printWaitingList("IPHONE15_256GB");
+        lruMap = new LinkedHashMap<String, DNSEntry>(capacity, 0.75f, true) {
+            protected boolean removeEldestEntry(Map.Entry<String, DNSEntry> eldest) {
+                if (size() > DNSCache.this.capacity) {
+                    cache.remove(eldest.getKey());
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
+    // Resolve domain
+    public synchronized String resolve(String domain) {
+
+        if (cache.containsKey(domain)) {
+
+            DNSEntry entry = cache.get(domain);
+
+            if (!entry.isExpired()) {
+                hits++;
+                lruMap.get(domain); // update LRU order
+                return "Cache HIT → " + entry.ipAddress;
+            }
+
+            // expired
+            cache.remove(domain);
+            lruMap.remove(domain);
+        }
+
+        // cache miss
+        misses++;
+
+        String ip = queryUpstreamDNS(domain);
+
+        DNSEntry newEntry = new DNSEntry(domain, ip, 300);
+
+        cache.put(domain, newEntry);
+        lruMap.put(domain, newEntry);
+
+        return "Cache MISS → " + ip;
+    }
+
+    // Simulate upstream DNS lookup
+    private String queryUpstreamDNS(String domain) {
+
+        Random rand = new Random();
+
+        return "172.217.14." + rand.nextInt(255);
+    }
+
+    // Cache statistics
+    public void getCacheStats() {
+
+        int total = hits + misses;
+
+        double hitRate = total == 0 ? 0 : (hits * 100.0 / total);
+
+        System.out.println("Hits: " + hits);
+        System.out.println("Misses: " + misses);
+        System.out.println("Hit Rate: " + hitRate + "%");
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+
+        DNSCache dns = new DNSCache(3);
+
+        System.out.println(dns.resolve("google.com"));
+        System.out.println(dns.resolve("google.com"));
+        System.out.println(dns.resolve("openai.com"));
+        System.out.println(dns.resolve("github.com"));
+        System.out.println(dns.resolve("google.com"));
+
+        dns.getCacheStats();
     }
 }
