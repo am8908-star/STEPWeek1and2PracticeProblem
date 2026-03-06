@@ -1,109 +1,112 @@
 import java.util.*;
 
-class DNSCache {
+class PlagiarismDetector {
 
-    class DNSEntry {
-        String domain;
-        String ipAddress;
-        long expiryTime;
+    // n-gram -> set of document IDs
+    private HashMap<String, Set<String>> ngramIndex;
 
-        DNSEntry(String domain, String ipAddress, long ttlSeconds) {
-            this.domain = domain;
-            this.ipAddress = ipAddress;
-            this.expiryTime = System.currentTimeMillis() + ttlSeconds * 1000;
-        }
+    // documentId -> list of ngrams
+    private HashMap<String, List<String>> documentNgrams;
 
-        boolean isExpired() {
-            return System.currentTimeMillis() > expiryTime;
+    private int N = 5; // 5-gram
+
+    public PlagiarismDetector() {
+        ngramIndex = new HashMap<>();
+        documentNgrams = new HashMap<>();
+    }
+
+    // Add document to database
+    public void addDocument(String docId, String text) {
+
+        List<String> ngrams = generateNgrams(text);
+
+        documentNgrams.put(docId, ngrams);
+
+        for (String gram : ngrams) {
+            ngramIndex.putIfAbsent(gram, new HashSet<>());
+            ngramIndex.get(gram).add(docId);
         }
     }
 
-    private int capacity;
-    private HashMap<String, DNSEntry> cache;
+    // Analyze new document
+    public void analyzeDocument(String docId, String text) {
 
-    // LinkedHashMap for LRU
-    private LinkedHashMap<String, DNSEntry> lruMap;
+        List<String> ngrams = generateNgrams(text);
 
-    private int hits = 0;
-    private int misses = 0;
+        HashMap<String, Integer> matchCount = new HashMap<>();
 
-    public DNSCache(int capacity) {
-        this.capacity = capacity;
+        for (String gram : ngrams) {
 
-        cache = new HashMap<>();
+            if (ngramIndex.containsKey(gram)) {
 
-        lruMap = new LinkedHashMap<String, DNSEntry>(capacity, 0.75f, true) {
-            protected boolean removeEldestEntry(Map.Entry<String, DNSEntry> eldest) {
-                if (size() > DNSCache.this.capacity) {
-                    cache.remove(eldest.getKey());
-                    return true;
+                for (String existingDoc : ngramIndex.get(gram)) {
+
+                    matchCount.put(
+                            existingDoc,
+                            matchCount.getOrDefault(existingDoc, 0) + 1
+                    );
                 }
-                return false;
             }
-        };
-    }
-
-    // Resolve domain
-    public synchronized String resolve(String domain) {
-
-        if (cache.containsKey(domain)) {
-
-            DNSEntry entry = cache.get(domain);
-
-            if (!entry.isExpired()) {
-                hits++;
-                lruMap.get(domain); // update LRU order
-                return "Cache HIT → " + entry.ipAddress;
-            }
-
-            // expired
-            cache.remove(domain);
-            lruMap.remove(domain);
         }
 
-        // cache miss
-        misses++;
+        System.out.println("Extracted " + ngrams.size() + " n-grams");
 
-        String ip = queryUpstreamDNS(domain);
+        for (String doc : matchCount.keySet()) {
 
-        DNSEntry newEntry = new DNSEntry(domain, ip, 300);
+            int matches = matchCount.get(doc);
 
-        cache.put(domain, newEntry);
-        lruMap.put(domain, newEntry);
+            double similarity = (matches * 100.0) / ngrams.size();
 
-        return "Cache MISS → " + ip;
+            System.out.println(
+                    "Found " + matches + " matching n-grams with \"" + doc + "\""
+            );
+
+            System.out.println("Similarity: " + similarity + "%");
+
+            if (similarity > 50) {
+                System.out.println("⚠ PLAGIARISM DETECTED\n");
+            }
+        }
     }
 
-    // Simulate upstream DNS lookup
-    private String queryUpstreamDNS(String domain) {
+    // Generate n-grams
+    private List<String> generateNgrams(String text) {
 
-        Random rand = new Random();
+        List<String> grams = new ArrayList<>();
 
-        return "172.217.14." + rand.nextInt(255);
+        String[] words = text.toLowerCase().split("\\s+");
+
+        for (int i = 0; i <= words.length - N; i++) {
+
+            StringBuilder sb = new StringBuilder();
+
+            for (int j = 0; j < N; j++) {
+                sb.append(words[i + j]).append(" ");
+            }
+
+            grams.add(sb.toString().trim());
+        }
+
+        return grams;
     }
 
-    // Cache statistics
-    public void getCacheStats() {
+    public static void main(String[] args) {
 
-        int total = hits + misses;
+        PlagiarismDetector detector = new PlagiarismDetector();
 
-        double hitRate = total == 0 ? 0 : (hits * 100.0 / total);
+        detector.addDocument(
+                "essay_089.txt",
+                "machine learning is a field of artificial intelligence that focuses on data"
+        );
 
-        System.out.println("Hits: " + hits);
-        System.out.println("Misses: " + misses);
-        System.out.println("Hit Rate: " + hitRate + "%");
-    }
+        detector.addDocument(
+                "essay_092.txt",
+                "machine learning is a field of artificial intelligence used for data analysis"
+        );
 
-    public static void main(String[] args) throws InterruptedException {
-
-        DNSCache dns = new DNSCache(3);
-
-        System.out.println(dns.resolve("google.com"));
-        System.out.println(dns.resolve("google.com"));
-        System.out.println(dns.resolve("openai.com"));
-        System.out.println(dns.resolve("github.com"));
-        System.out.println(dns.resolve("google.com"));
-
-        dns.getCacheStats();
+        detector.analyzeDocument(
+                "essay_123.txt",
+                "machine learning is a field of artificial intelligence used in modern data science"
+        );
     }
 }
