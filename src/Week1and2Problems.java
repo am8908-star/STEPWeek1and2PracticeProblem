@@ -1,112 +1,97 @@
 import java.util.*;
 
-class PlagiarismDetector {
+class Event {
+    String url;
+    String userId;
+    String source;
 
-    // n-gram -> set of document IDs
-    private HashMap<String, Set<String>> ngramIndex;
+    Event(String url, String userId, String source) {
+        this.url = url;
+        this.userId = userId;
+        this.source = source;
+    }
+}
 
-    // documentId -> list of ngrams
-    private HashMap<String, List<String>> documentNgrams;
+class AnalyticsSystem {
 
-    private int N = 5; // 5-gram
+    private HashMap<String, Integer> pageViews = new HashMap<>();
+    private HashMap<String, HashSet<String>> uniqueVisitors = new HashMap<>();
+    private HashMap<String, Integer> trafficSources = new HashMap<>();
 
-    public PlagiarismDetector() {
-        ngramIndex = new HashMap<>();
-        documentNgrams = new HashMap<>();
+    public void processEvent(Event e) {
+
+        pageViews.put(e.url, pageViews.getOrDefault(e.url, 0) + 1);
+
+        uniqueVisitors.putIfAbsent(e.url, new HashSet<>());
+        uniqueVisitors.get(e.url).add(e.userId);
+
+        trafficSources.put(e.source, trafficSources.getOrDefault(e.source, 0) + 1);
     }
 
-    // Add document to database
-    public void addDocument(String docId, String text) {
+    public List<Map.Entry<String, Integer>> getTopPages() {
 
-        List<String> ngrams = generateNgrams(text);
+        PriorityQueue<Map.Entry<String, Integer>> pq =
+                new PriorityQueue<>(Map.Entry.comparingByValue());
 
-        documentNgrams.put(docId, ngrams);
-
-        for (String gram : ngrams) {
-            ngramIndex.putIfAbsent(gram, new HashSet<>());
-            ngramIndex.get(gram).add(docId);
+        for (Map.Entry<String, Integer> entry : pageViews.entrySet()) {
+            pq.offer(entry);
+            if (pq.size() > 10) pq.poll();
         }
+
+        List<Map.Entry<String, Integer>> result = new ArrayList<>();
+
+        while (!pq.isEmpty()) {
+            result.add(pq.poll());
+        }
+
+        Collections.reverse(result);
+        return result;
     }
 
-    // Analyze new document
-    public void analyzeDocument(String docId, String text) {
+    public void getDashboard() {
 
-        List<String> ngrams = generateNgrams(text);
+        List<Map.Entry<String, Integer>> topPages = getTopPages();
 
-        HashMap<String, Integer> matchCount = new HashMap<>();
+        System.out.println("Top Pages:");
 
-        for (String gram : ngrams) {
+        int rank = 1;
+        for (Map.Entry<String, Integer> entry : topPages) {
+            String url = entry.getKey();
+            int views = entry.getValue();
+            int unique = uniqueVisitors.get(url).size();
 
-            if (ngramIndex.containsKey(gram)) {
-
-                for (String existingDoc : ngramIndex.get(gram)) {
-
-                    matchCount.put(
-                            existingDoc,
-                            matchCount.getOrDefault(existingDoc, 0) + 1
-                    );
-                }
-            }
+            System.out.println(rank + ". " + url + " - " + views + " views (" + unique + " unique)");
+            rank++;
         }
 
-        System.out.println("Extracted " + ngrams.size() + " n-grams");
+        int total = 0;
+        for (int count : trafficSources.values()) total += count;
 
-        for (String doc : matchCount.keySet()) {
+        System.out.println("\nTraffic Sources:");
 
-            int matches = matchCount.get(doc);
+        for (Map.Entry<String, Integer> entry : trafficSources.entrySet()) {
 
-            double similarity = (matches * 100.0) / ngrams.size();
+            double percent = (entry.getValue() * 100.0) / total;
 
-            System.out.println(
-                    "Found " + matches + " matching n-grams with \"" + doc + "\""
-            );
-
-            System.out.println("Similarity: " + similarity + "%");
-
-            if (similarity > 50) {
-                System.out.println("⚠ PLAGIARISM DETECTED\n");
-            }
+            System.out.println(entry.getKey() + ": " + String.format("%.2f", percent) + "%");
         }
     }
+}
 
-    // Generate n-grams
-    private List<String> generateNgrams(String text) {
-
-        List<String> grams = new ArrayList<>();
-
-        String[] words = text.toLowerCase().split("\\s+");
-
-        for (int i = 0; i <= words.length - N; i++) {
-
-            StringBuilder sb = new StringBuilder();
-
-            for (int j = 0; j < N; j++) {
-                sb.append(words[i + j]).append(" ");
-            }
-
-            grams.add(sb.toString().trim());
-        }
-
-        return grams;
-    }
+public class Week1and2Problems {
 
     public static void main(String[] args) {
 
-        PlagiarismDetector detector = new PlagiarismDetector();
+        AnalyticsSystem analytics = new AnalyticsSystem();
 
-        detector.addDocument(
-                "essay_089.txt",
-                "machine learning is a field of artificial intelligence that focuses on data"
-        );
+        analytics.processEvent(new Event("/article/breaking-news","user_123","google"));
+        analytics.processEvent(new Event("/article/breaking-news","user_456","facebook"));
+        analytics.processEvent(new Event("/sports/championship","user_789","direct"));
+        analytics.processEvent(new Event("/sports/championship","user_101","google"));
+        analytics.processEvent(new Event("/sports/championship","user_102","google"));
+        analytics.processEvent(new Event("/tech/ai","user_103","facebook"));
+        analytics.processEvent(new Event("/tech/ai","user_104","google"));
 
-        detector.addDocument(
-                "essay_092.txt",
-                "machine learning is a field of artificial intelligence used for data analysis"
-        );
-
-        detector.analyzeDocument(
-                "essay_123.txt",
-                "machine learning is a field of artificial intelligence used in modern data science"
-        );
+        analytics.getDashboard();
     }
 }
