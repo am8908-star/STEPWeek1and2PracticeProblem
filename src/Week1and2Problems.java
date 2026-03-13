@@ -1,91 +1,89 @@
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.*;
 
-class TokenBucket {
+class TrieNode {
+    Map<Character, TrieNode> children = new HashMap<>();
+    Map<String, Integer> freqMap = new HashMap<>();
+}
 
-    private long tokens;
-    private long maxTokens;
-    private double refillRate;
-    private long lastRefillTime;
+class AutocompleteSystem {
 
-    public TokenBucket(long maxTokens, double refillRate) {
-        this.tokens = maxTokens;
-        this.maxTokens = maxTokens;
-        this.refillRate = refillRate;
-        this.lastRefillTime = System.currentTimeMillis();
-    }
+    TrieNode root = new TrieNode();
+    Map<String, Integer> globalFreq = new HashMap<>();
 
-    private void refill() {
-        long now = System.currentTimeMillis();
-        double tokensToAdd = (now - lastRefillTime) / 1000.0 * refillRate;
-        if (tokensToAdd > 0) {
-            tokens = Math.min(maxTokens, tokens + (long) tokensToAdd);
-            lastRefillTime = now;
+    public void addQuery(String query, int freq) {
+
+        globalFreq.put(query, globalFreq.getOrDefault(query, 0) + freq);
+
+        TrieNode node = root;
+
+        for(char c : query.toCharArray()){
+
+            node.children.putIfAbsent(c, new TrieNode());
+            node = node.children.get(c);
+
+            node.freqMap.put(query, globalFreq.get(query));
         }
     }
 
-    public synchronized boolean allowRequest() {
-        refill();
-        if (tokens > 0) {
-            tokens--;
-            return true;
+    public void updateFrequency(String query) {
+        addQuery(query,1);
+    }
+
+    public List<String> search(String prefix){
+
+        TrieNode node = root;
+
+        for(char c : prefix.toCharArray()){
+            if(!node.children.containsKey(c)) return new ArrayList<>();
+            node = node.children.get(c);
         }
-        return false;
-    }
 
-    public synchronized long getRemainingTokens() {
-        refill();
-        return tokens;
-    }
+        PriorityQueue<Map.Entry<String,Integer>> pq =
+                new PriorityQueue<>((a,b)->a.getValue()-b.getValue());
 
-    public synchronized long getRetryAfterSeconds() {
-        if (tokens > 0) return 0;
-        return (long)(1 / refillRate);
+        for(Map.Entry<String,Integer> entry : node.freqMap.entrySet()){
+            pq.offer(entry);
+            if(pq.size()>10) pq.poll();
+        }
+
+        List<String> result = new ArrayList<>();
+
+        while(!pq.isEmpty()){
+            result.add(pq.poll().getKey() + " (" + pq.peek() + ")");
+        }
+
+        Collections.reverse(result);
+        return result;
     }
 }
 
-class RateLimiter {
-
-    private ConcurrentHashMap<String, TokenBucket> buckets = new ConcurrentHashMap<>();
-
-    private TokenBucket getBucket(String clientId) {
-        return buckets.computeIfAbsent(clientId, id -> new TokenBucket(1000, 1000.0 / 3600));
-    }
-
-    public String checkRateLimit(String clientId) {
-
-        TokenBucket bucket = getBucket(clientId);
-
-        if (bucket.allowRequest()) {
-            return "Allowed (" + bucket.getRemainingTokens() + " requests remaining)";
-        }
-
-        return "Denied (0 requests remaining, retry after " + bucket.getRetryAfterSeconds() + "s)";
-    }
-
-    public String getRateLimitStatus(String clientId) {
-
-        TokenBucket bucket = getBucket(clientId);
-
-        long remaining = bucket.getRemainingTokens();
-        long used = 1000 - remaining;
-        long reset = System.currentTimeMillis()/1000 + bucket.getRetryAfterSeconds();
-
-        return "{used: " + used + ", limit: 1000, reset: " + reset + "}";
-    }
-}
-
-public class DistributedRateLimiterDemo {
+public class AutocompleteDemo {
 
     public static void main(String[] args) {
 
-        RateLimiter limiter = new RateLimiter();
+        AutocompleteSystem system = new AutocompleteSystem();
 
-        String clientId = "abc123";
+        system.addQuery("java tutorial",1234567);
+        system.addQuery("javascript",987654);
+        system.addQuery("java download",456789);
+        system.addQuery("java 21 features",1);
 
-        for(int i=0;i<1005;i++){
-            System.out.println(limiter.checkRateLimit(clientId));
+        List<String> suggestions = system.search("jav");
+
+        for(String s : suggestions){
+            System.out.println(s);
         }
 
-        System.out.println(limiter.getRateLimitStatus(clientId));
+        system.updateFrequency("java 21 features");
+        system.updateFrequency("java 21 features");
+        system.updateFrequency("java 21 features");
+
+        System.out.println("\nAfter trending update:\n");
+
+        suggestions = system.search("jav");
+
+        for(String s : suggestions){
+            System.out.println(s);
+        }
     }
 }
